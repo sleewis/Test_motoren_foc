@@ -47,6 +47,10 @@ TwoWire I2C_1 = TwoWire(0);
 Motor motor1(33, 32, 25, 12, 39, 36, &I2C_1, 11);
 //Motor motor2(26, 27, 14, 12, 34, 35, &I2C_2, 11);
 
+// ─── Synchronisatie uitlijning → encoder-task ─────────────────────────────────
+// De encoder-task wacht hierop zodat hij niet concurrent met alignFinish() loopt.
+volatile bool motorAligned = false;
+
 // ─── Gedeelde toestand (fast ↔ slow task) ─────────────────────────────────────
 // De fast task schrijft telemetrie; de slow task schrijft commando's.
 // Een mutex voorkomt dat beide tasks tegelijk schrijven.
@@ -96,18 +100,21 @@ void fastTask(void *pvParameters) {
   motor1.alignFinish();
   //motor2.alignFinish();
 
+  motorAligned = true;  // geef de encoder-task toestemming om te starten
   Serial.println("[Fast] Motoren klaar. Start regelaar.");
 
-  TickType_t xLastWakeTime = xTaskGetTickCount();
-  const TickType_t xPeriod = pdMS_TO_TICKS(2);  // 2 ms = 500 Hz
+  // FreeRTOS ticks zijn 1 ms — te grof voor 2 kHz (500 µs).
+  // Busy-wait met esp_timer_get_time() geeft µs-nauwkeurige timing.
+  // Core 1 is exclusief voor deze task, dus busy-wait is hier prima.
+  int64_t nextWakeUs = esp_timer_get_time();
+  const int64_t periodUs = 500LL;  // 500 µs = 2 kHz
 
   while (true) {
     // ── Lees commando's van slow task ────────────────────────────────────────
-    float cmd1, cmd2;
+    float cmd1;
     bool  useFOC;
     if (xSemaphoreTake(xMutex, 0) == pdTRUE) {
       cmd1   = gState.cmd1;
-      //cmd2   = gState.cmd2;
       useFOC = gState.useFOC;
       xSemaphoreGive(xMutex);
     }
@@ -139,7 +146,9 @@ void fastTask(void *pvParameters) {
       xSemaphoreGive(xMutex);
     }
 
-    vTaskDelayUntil(&xLastWakeTime, xPeriod);
+    // ── Wacht tot volgende periode ────────────────────────────────────────────
+    nextWakeUs += periodUs;
+    while (esp_timer_get_time() < nextWakeUs) { }
   }
 }
 
@@ -168,8 +177,7 @@ void slowTask(void *pvParameters) {
   while (true) {
     // ── Lees telemetrie van fast task ─────────────────────────────────────────
     float a1, v1, id1, iq1, c1;
-    float a2, v2, id2, iq2, c2;
-    bool  ok1, ok2;
+    bool  ok1;
 
     if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE) {
       a1 = gState.angle1; v1 = gState.vel1;
@@ -276,6 +284,28 @@ void slowTask(void *pvParameters) {
 
 
 // ═════════════════════════════════════════════════════════════════════════════
+//  ENCODER TASK — Core 0
+//
+//  Leest de AS5600 via I2C zo snel mogelijk (~3–5 kHz bij 400 kHz I2C-bus).
+//  Schrijft de hoek en snelheid naar volatile leden in Motor, zodat de
+//  fast task die direct kan lezen zonder I2C-wachttijd.
+//
+//  Wacht met starten totdat de uitlijning klaar is, zodat alignFinish()
+//  niet concurrent met pollEncoder() de encoder uitleest.
+// ═════════════════════════════════════════════════════════════════════════════
+void encoderTask(void *pvParameters) {
+  while (!motorAligned) vTaskDelay(pdMS_TO_TICKS(1));
+
+  while (true) {
+    motor1.pollEncoder();
+    // Geen delay — I2C-transacties (~150–200 µs elk) begrenzen automatisch
+    // de leessnelheid. taskYIELD() geeft andere Core-0-taken een kans.
+    taskYIELD();
+  }
+}
+
+
+// ═════════════════════════════════════════════════════════════════════════════
 //  SETUP
 // ═════════════════════════════════════════════════════════════════════════════
 void setup() {
@@ -294,9 +324,11 @@ void setup() {
   xMutex = xSemaphoreCreateMutex();
 
   // Fast task op Core 1 met hogere prioriteit — mag nooit blokkeren
-  xTaskCreatePinnedToCore(fastTask, "FastTask", 4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(fastTask,    "FastTask",    4096, NULL, 2, NULL, 1);
   // Slow task op Core 0 met lagere prioriteit
-  xTaskCreatePinnedToCore(slowTask, "SlowTask", 4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(slowTask,    "SlowTask",    4096, NULL, 1, NULL, 0);
+  // Encoder task op Core 0 — leest I2C en schrijft hoek voor fast task
+  xTaskCreatePinnedToCore(encoderTask, "EncoderTask", 2048, NULL, 1, NULL, 0);
 }
 
 

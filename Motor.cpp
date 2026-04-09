@@ -18,6 +18,7 @@ Motor::Motor(int u, int v, int w, int en,
 
   rawAngle = 0;
   lastMechAngle = prevMechAngle = offset = _velocity = 0.0f;
+  _lastEncoderUs = 0;
   avgIa = avgIb = avgIc = avgI = peakI = 0.0f;
 
   _id = _iq = _id_integral = _iq_integral = 0.0f;
@@ -94,20 +95,9 @@ void Motor::setFocGains(float kp, float ki) {
 // Ia, Ib, Ic worden via referentie teruggegeven voor gebruik in de FOC-keten.
 // ─────────────────────────────────────────────────────────────────────────────
 bool Motor::commonUpdate(float &Ia, float &Ib, float &Ic) {
-  // ── Encoder ──────────────────────────────────────────────────────────────
-  if (!readSensor()) {
-    _encoderOk = false; brake(); return false;
-  }
-  _encoderOk    = true;
-  lastMechAngle = rawAngle * (TWO_PI / 4096.0f);
-
-  // ── Snelheid (differentie + wrap-correctie + low-pass filter) ────────────
-  float delta = lastMechAngle - prevMechAngle;
-  if      (delta >  PI) delta -= TWO_PI;
-  else if (delta < -PI) delta += TWO_PI;
-  float rawVelocity = delta / MOTOR_DT;
-  _velocity     = VELOCITY_ALPHA * _velocity + (1.0f - VELOCITY_ALPHA) * rawVelocity;
-  prevMechAngle = lastMechAngle;
+  // ── Encoder-check ─────────────────────────────────────────────────────────
+  // Hoek en snelheid worden bijgewerkt door pollEncoder() in de encoder-task.
+  if (!_encoderOk) { brake(); return false; }
 
   // ── Fasestromen meten ─────────────────────────────────────────────────────
   Ia = readCurrent(IA_PIN);
@@ -209,6 +199,39 @@ void Motor::loopFOC(float iqTarget) {
   float Vbeta  = Vd * sinT + Vq * cosT;
 
   applyVoltageAlphaBeta(Valpha, Vbeta);
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// pollEncoder — aanroepen vanuit aparte encoder-task
+//
+// Leest de AS5600 via I2C, berekent de mechanische hoek en hoeksnelheid.
+// Schrijft naar lastMechAngle en _velocity (volatile), zodat de snelle
+// motorlus die waarden zonder I2C-wachttijd kan lezen.
+//
+// Gebruik micros() als tijdbasis zodat de werkelijke dt gebruikt wordt,
+// ongeacht hoe snel de encoder-task draait.
+// ─────────────────────────────────────────────────────────────────────────────
+void Motor::pollEncoder() {
+  uint32_t now = micros();
+  float dt = (_lastEncoderUs == 0) ? MOTOR_DT
+                                   : (now - _lastEncoderUs) * 1e-6f;
+  _lastEncoderUs = now;
+
+  if (!readSensor()) {
+    _encoderOk = false;
+    return;
+  }
+  _encoderOk = true;
+
+  float mech  = rawAngle * (TWO_PI / 4096.0f);
+  float delta = mech - prevMechAngle;
+  if      (delta >  PI) delta -= TWO_PI;
+  else if (delta < -PI) delta += TWO_PI;
+
+  _velocity     = VELOCITY_ALPHA * _velocity + (1.0f - VELOCITY_ALPHA) * (delta / dt);
+  prevMechAngle = mech;
+  lastMechAngle = mech;  // als laatste schrijven zodat fastTask nooit een halfklaar resultaat leest
 }
 
 

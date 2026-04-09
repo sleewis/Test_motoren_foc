@@ -22,7 +22,7 @@
 #define ALIGN_VOLTAGE   3.0f    // [V]
 
 // ─── Tijdstap & snelheidsfilter ───────────────────────────────────────────────
-#define MOTOR_DT        0.002f  // [s]  500 Hz
+#define MOTOR_DT        0.0005f // [s]  2 kHz
 #define VELOCITY_ALPHA  0.80f   // low-pass filter coefficient
 
 // ─── Stroombeveiliging ────────────────────────────────────────────────────────
@@ -58,6 +58,10 @@ public:
   void setFocGains(float kp, float ki);
 
   // ── Status & telemetrie ──────────────────────────────────────────────────
+  // Aanroepen vanuit een aparte encoder-task (NIET vanuit de snelle motorlus).
+  // Leest de AS5600 via I2C en berekent de hoeksnelheid met de werkelijke dt.
+  void pollEncoder();
+
   bool  isOk()            const { return _encoderOk && !_overcurrent; }
   bool  hasEncoderError() const { return !_encoderOk; }
   bool  isOvercurrent()   const { return _overcurrent; }
@@ -76,10 +80,11 @@ private:
   int polePairs;
 
   uint16_t rawAngle;
-  float    lastMechAngle;
+  volatile float lastMechAngle;  // geschreven door encoderTask, gelezen door fastTask
   float    prevMechAngle;
   float    offset;
-  float    _velocity;
+  volatile float _velocity;      // geschreven door encoderTask, gelezen door slowTask
+  uint32_t _lastEncoderUs;       // tijdstip vorige encoder-lees [µs]
 
   float avgIa, avgIb, avgIc, avgI, peakI;
 
@@ -97,7 +102,7 @@ private:
   float gain;     // [-]
   float adcMid;   // [ADC-ticks]
 
-  bool _encoderOk;
+  volatile bool _encoderOk;   // geschreven door encoderTask én fastTask (overcurrent)
   bool _overcurrent;
 
   // Gemeenschappelijke stap 1–3 voor beide loopXxx-methoden:
