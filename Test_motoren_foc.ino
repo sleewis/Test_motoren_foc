@@ -41,11 +41,11 @@
 // I2C_1 (Wire0, GPIO19/18): AS5600 motor 1 (0x36)
 // I2C_2 (Wire1, GPIO23/5):  AS5600 motor 2 (0x36)
 TwoWire I2C_1 = TwoWire(0);
-TwoWire I2C_2 = TwoWire(1);
+//TwoWire I2C_2 = TwoWire(1);
 
 // ─── Motoren ──────────────────────────────────────────────────────────────────
 Motor motor1(33, 32, 25, 12, 39, 36, &I2C_1, 11);
-Motor motor2(26, 27, 14, 12, 34, 35, &I2C_2, 11);
+//Motor motor2(26, 27, 14, 12, 34, 35, &I2C_2, 11);
 
 // ─── Gedeelde toestand (fast ↔ slow task) ─────────────────────────────────────
 // De fast task schrijft telemetrie; de slow task schrijft commando's.
@@ -86,15 +86,15 @@ struct SharedState {
 // ═════════════════════════════════════════════════════════════════════════════
 void fastTask(void *pvParameters) {
   motor1.begin();
-  motor2.begin();
+  //motor2.begin();
 
   // Parallelle uitlijning — beide motoren tegelijk zodat de wachttijd
   // maar één keer valt (2 s in plaats van 2× 2 s)
   motor1.alignStart();
-  motor2.alignStart();
+  //motor2.alignStart();
   delay(2000);
   motor1.alignFinish();
-  motor2.alignFinish();
+  //motor2.alignFinish();
 
   Serial.println("[Fast] Motoren klaar. Start regelaar.");
 
@@ -107,7 +107,7 @@ void fastTask(void *pvParameters) {
     bool  useFOC;
     if (xSemaphoreTake(xMutex, 0) == pdTRUE) {
       cmd1   = gState.cmd1;
-      cmd2   = gState.cmd2;
+      //cmd2   = gState.cmd2;
       useFOC = gState.useFOC;
       xSemaphoreGive(xMutex);
     }
@@ -115,10 +115,10 @@ void fastTask(void *pvParameters) {
     // ── Motoren aansturen ────────────────────────────────────────────────────
     if (useFOC) {
       motor1.loopFOC( cmd1);
-      motor2.loopFOC(-cmd2);  // motor 2 gespiegeld gemonteerd → teken omdraaien
+      //motor2.loopFOC(-cmd2);  // motor 2 gespiegeld gemonteerd → teken omdraaien
     } else {
       motor1.loopOpenLoop( cmd1);
-      motor2.loopOpenLoop(-cmd2);
+      //motor2.loopOpenLoop(-cmd2);
     }
 
     // ── Telemetrie terugschrijven ─────────────────────────────────────────────
@@ -130,12 +130,12 @@ void fastTask(void *pvParameters) {
       gState.cur1   = motor1.getAvgCurrent();
       gState.ok1    = motor1.isOk();
 
-      gState.angle2 = motor2.getAngle();
-      gState.vel2   = motor2.getVelocity();
-      gState.id2    = motor2.getId();
-      gState.iq2    = motor2.getIq();
-      gState.cur2   = motor2.getAvgCurrent();
-      gState.ok2    = motor2.isOk();
+      //gState.angle2 = motor2.getAngle();
+      //gState.vel2   = motor2.getVelocity();
+      //gState.id2    = motor2.getId();
+      //gState.iq2    = motor2.getIq();
+      //gState.cur2   = motor2.getAvgCurrent();
+      //gState.ok2    = motor2.isOk();
       xSemaphoreGive(xMutex);
     }
 
@@ -174,8 +174,8 @@ void slowTask(void *pvParameters) {
     if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE) {
       a1 = gState.angle1; v1 = gState.vel1;
       id1 = gState.id1;   iq1 = gState.iq1; c1 = gState.cur1; ok1 = gState.ok1;
-      a2 = gState.angle2; v2 = gState.vel2;
-      id2 = gState.id2;   iq2 = gState.iq2; c2 = gState.cur2; ok2 = gState.ok2;
+      //a2 = gState.angle2; v2 = gState.vel2;
+      //id2 = gState.id2;   iq2 = gState.iq2; c2 = gState.cur2; ok2 = gState.ok2;
       xSemaphoreGive(xMutex);
     }
 
@@ -190,17 +190,17 @@ void slowTask(void *pvParameters) {
       Serial.printf(
         "M1: angle=%6.3f  vel=%7.2f rad/s  Id=%6.3fA  Iq=%6.3fA  I=%5.3fA  [%s][%s]\n",
         a1, v1, id1, iq1, c1, ok1 ? "OK  " : "FOUT", modus);
-      Serial.printf(
-        "M2: angle=%6.3f  vel=%7.2f rad/s  Id=%6.3fA  Iq=%6.3fA  I=%5.3fA  [%s][%s]\n\n",
-        a2, v2, id2, iq2, c2, ok2 ? "OK  " : "FOUT", modus);
+      //Serial.printf(
+      //  "M2: angle=%6.3f  vel=%7.2f rad/s  Id=%6.3fA  Iq=%6.3fA  I=%5.3fA  [%s][%s]\n\n",
+      //  a2, v2, id2, iq2, c2, ok2 ? "OK  " : "FOUT", modus);
     } else {
       // In open-loop: Id/Iq niet beschikbaar, toon alleen encoder en stroom
       Serial.printf(
         "M1: angle=%6.3f  vel=%7.2f rad/s  I=%5.3fA  [%s][%s]\n",
         a1, v1, c1, ok1 ? "OK  " : "FOUT", modus);
-      Serial.printf(
-        "M2: angle=%6.3f  vel=%7.2f rad/s  I=%5.3fA  [%s][%s]\n\n",
-        a2, v2, c2, ok2 ? "OK  " : "FOUT", modus);
+      //Serial.printf(
+      //  "M2: angle=%6.3f  vel=%7.2f rad/s  I=%5.3fA  [%s][%s]\n\n",
+      //  a2, v2, c2, ok2 ? "OK  " : "FOUT", modus);
     }
 
     // ── Seriële commando's verwerken ──────────────────────────────────────────
@@ -249,13 +249,13 @@ void slowTask(void *pvParameters) {
         // FOC proportionele gain aanpassen
         focKp = cmd.substring(3).toFloat();
         motor1.setFocGains(focKp, focKi);
-        motor2.setFocGains(focKp, focKi);
+        //motor2.setFocGains(focKp, focKi);
 
       } else if (cmd.startsWith("ki ")) {
         // FOC integrerende gain aanpassen
         focKi = cmd.substring(3).toFloat();
         motor1.setFocGains(focKp, focKi);
-        motor2.setFocGains(focKp, focKi);
+        //motor2.setFocGains(focKp, focKi);
 
       } else {
         Serial.println("[?] Onbekend commando. Zie header van dit bestand voor de lijst.");
@@ -289,7 +289,7 @@ void setup() {
   Serial.println("Wacht op uitlijning (~2 s)...");
 
   I2C_1.begin(19, 18, 400000);  // motor 1 encoder
-  I2C_2.begin(23,  5, 400000);  // motor 2 encoder
+  //I2C_2.begin(23,  5, 400000);  // motor 2 encoder
 
   xMutex = xSemaphoreCreateMutex();
 
