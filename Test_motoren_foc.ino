@@ -60,7 +60,7 @@ struct SharedState {
   // Commando's — slow task schrijft, fast task leest
   float cmd1    = 0.0f;   // setpoint motor 1  [V] of [A]
   float cmd2    = 0.0f;   // setpoint motor 2  [V] of [A]
-  bool  useFOC  = false;  // false = open-loop, true = FOC
+  bool  useFOC  = true;  // false = open-loop, true = FOC
 
   // Telemetrie — fast task schrijft, slow task leest
   float angle1  = 0.0f;   // mechanische hoek motor 1 [rad]
@@ -316,6 +316,8 @@ void setup() {
   Serial.println("  Test_motoren_foc — motor & encoder test");
   Serial.println("══════════════════════════════════════════");
   Serial.println("Commando's: m1 <V/A>  m2 <V/A>  ol  foc  kp <val>  ki <val>  stop  info");
+  Serial.println("10 seconden om batterij aan te sluiten");
+  delay(10000);
   Serial.println("Wacht op uitlijning (~2 s)...");
 
   I2C_1.begin(19, 18, 400000);  // motor 1 encoder
@@ -325,7 +327,7 @@ void setup() {
 
   // Fast task op Core 1 met hogere prioriteit — mag nooit blokkeren
   xTaskCreatePinnedToCore(fastTask,    "FastTask",    4096, NULL, 2, NULL, 1);
-  // Slow task op Core 0 met lagere prioriteit
+  // Slow task op Core 0 met lagere prioriteit. Hier is ook o.a. WiFi beschikbaar
   xTaskCreatePinnedToCore(slowTask,    "SlowTask",    4096, NULL, 1, NULL, 0);
   // Encoder task op Core 0 — leest I2C en schrijft hoek voor fast task
   xTaskCreatePinnedToCore(encoderTask, "EncoderTask", 2048, NULL, 1, NULL, 0);
